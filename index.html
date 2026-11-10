@@ -120,6 +120,7 @@
 
         label { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); display: block; margin-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
         select, input, textarea { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 12px; margin-top: 6px; font-size: 0.9rem; font-family: inherit; outline: none; }
+        input:disabled { background-color: #e2e8f0; color: #64748b; cursor: not-allowed; border-color: #cbd5e1; }
 
         .btn { background: var(--secondary); color: white; border: none; padding: 14px; border-radius: 12px; width: 100%; cursor: pointer; font-weight: 700; font-size: 0.95rem; margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; }
         .btn-primary { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); }
@@ -289,7 +290,27 @@
                 <input type="text" id="crudNombre" placeholder="Apellidos y Nombres" required>
 
                 <label><i class="fa-solid fa-graduation-cap"></i> Curso:</label>
-                <input type="text" id="crudCurso" placeholder="Ej: 1ro A de Secundaria" required>
+                <select id="crudCurso" required>
+                    <option value="">-- Seleccionar Curso --</option>
+                    <option value="1A">1A</option>
+                    <option value="1B">1B</option>
+                    <option value="1C">1C</option>
+                    <option value="2A">2A</option>
+                    <option value="2B">2B</option>
+                    <option value="2C">2C</option>
+                    <option value="3A">3A</option>
+                    <option value="3B">3B</option>
+                    <option value="3C">3C</option>
+                    <option value="4A">4A</option>
+                    <option value="4B">4B</option>
+                    <option value="4C">4C</option>
+                    <option value="5A">5A</option>
+                    <option value="5B">5B</option>
+                    <option value="5C">5C</option>
+                    <option value="6A">6A</option>
+                    <option value="6B">6B</option>
+                    <option value="6C">6C</option>
+                </select>
 
                 <label><i class="fa-solid fa-user-shield"></i> Nombre del Tutor / Apoderado:</label>
                 <input type="text" id="crudTutor" placeholder="Nombre completo del tutor">
@@ -297,8 +318,8 @@
                 <label><i class="fa-solid fa-phone"></i> Teléfono del Tutor:</label>
                 <input type="text" id="crudTelTutor" placeholder="Ej: 71234567">
 
-                <label><i class="fa-solid fa-qrcode"></i> Código QR (Opcional - usa C.I. por defecto):</label>
-                <input type="text" id="crudQR" placeholder="Dejar en blanco para usar C.I.">
+                <label><i class="fa-solid fa-qrcode"></i> Código QR (Generado en Google Sheet):</label>
+                <input type="text" id="crudQR" placeholder="Generado automáticamente en la Hoja de Cálculo" disabled>
 
                 <div class="grid-crud-btns">
                     <button type="submit" class="btn btn-success" style="margin:0;">
