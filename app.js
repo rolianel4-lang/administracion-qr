@@ -1,8 +1,11 @@
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx3B0CBbj-SWr-DiEv2jjireS3ntpNparG8kElk3cW_UO21JdPRPah_HOZpdP84El4/exec";
 
 let html5QrCode = new Html5Qrcode("reader");
+let escanerActivo = false;
+let escaneoPausado = false;
 let todosLosEstudiantes = [];
 let estudianteActualModal = null;
+let registroHoyActual = null;
 let estudianteSeleccionadoIncidencia = null;
 let estudianteSeleccionadoCitacion = null;
 let estudianteFiltradoHistorial = null;
@@ -131,6 +134,11 @@ const obtenerHoraBolivia = () => {
     });
 };
 
+const obtenerNombreEstado = (cod) => {
+    const mapa = { 'P': 'PRESENTE', 'A': 'ATRASO', 'F': 'FALTA', 'L': 'LICENCIA' };
+    return mapa[String(cod).toUpperCase()] || cod;
+};
+
 function cambiarPestana(tabId, event) {
     document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(tb => tb.classList.remove('active'));
@@ -138,6 +146,15 @@ function cambiarPestana(tabId, event) {
     document.getElementById(tabId).classList.add('active');
     if (event && event.currentTarget) {
         event.currentTarget.classList.add('active');
+    }
+
+    if (tabId === 'tab-asistencia') {
+        const modoQRActivo = document.getElementById('btnModoQR').classList.contains('active');
+        if (modoQRActivo) {
+            iniciarScanner();
+        }
+    } else {
+        detenerScanner();
     }
 
     if (tabId === 'tab-historial' && (!event || event.type === 'click')) {
@@ -154,10 +171,12 @@ function seleccionarModoEntrada(modo) {
         document.getElementById('btnModoQR').classList.add('active');
         document.getElementById('seccionQR').style.display = 'block';
         document.getElementById('seccionManual').style.display = 'none';
+        iniciarScanner();
     } else {
         document.getElementById('btnModoManual').classList.add('active');
         document.getElementById('seccionQR').style.display = 'none';
         document.getElementById('seccionManual').style.display = 'block';
+        detenerScanner();
     }
 }
 
@@ -181,17 +200,57 @@ async function cargarEstudiantesGlobales() {
     }
 }
 
-function abrirPanelAccionEstudiante(ci) {
+// -------------------------------------------------------------
+// PANEL DE ASISTENCIA CON VERIFICACIÓN DE REGISTRO PREVIO HOY
+// -------------------------------------------------------------
+async function abrirPanelAccionEstudiante(ci) {
     const alu = todosLosEstudiantes.find(e => String(e.ci).trim() === String(ci).trim());
-    if (!alu) return Swal.fire('Error', 'Estudiante no registrado', 'error');
+    if (!alu) {
+        await Swal.fire('Error', 'Estudiante no registrado', 'error');
+        reanudarScannerSiCorresponde();
+        return;
+    }
 
     estudianteActualModal = alu;
+    registroHoyActual = null;
+    const fechaHoy = obtenerFechaBolivia();
 
     Swal.fire({
+        title: 'Verificando registro de hoy...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        const asistencias = await fetch(`${GOOGLE_SCRIPT_URL}?action=getData&sheet=asistencias`).then(r => r.json());
+        if (Array.isArray(asistencias)) {
+            registroHoyActual = asistencias.find(a =>
+                String(a.ci_estudiante).trim() === String(alu.ci).trim() &&
+                formatearFechaDDMMYYYY(a.fecha) === fechaHoy
+            ) || null;
+        }
+    } catch (e) {
+        console.error("Error verificando asistencia previa:", e);
+    }
+
+    let bannerRegistroPrevio = '';
+    if (registroHoyActual) {
+        const estTexto = obtenerNombreEstado(registroHoyActual.estado);
+        const horaTexto = formatearHoraHHMM(registroHoyActual.hora);
+        bannerRegistroPrevio = `
+            <div style="background:#fef3c7; border:1.5px solid #f59e0b; border-radius:10px; padding:10px; margin-bottom:12px; text-align:left; font-size:0.8rem; color:#92400e;">
+                <i class="fa-solid fa-circle-info"></i> <b>Ya tiene asistencia hoy (${fechaHoy}):</b><br>
+                Estado actual: <b>${estTexto}</b> (${horaTexto})${registroHoyActual.observacion ? ` — <i>"${registroHoyActual.observacion}"</i>` : ''}.<br>
+                <span style="font-size:0.75rem;">Si seleccionas un botón, se actualizará este registro.</span>
+            </div>
+        `;
+    }
+
+    await Swal.fire({
         title: `<strong style="color:var(--primary);">${alu.nombre}</strong>`,
         html: `
             <p style="margin:0 0 12px; color:#64748b; font-size:0.88rem;">C.I: <b>${alu.ci}</b> | Curso: <b>${alu.curso}</b></p>
-            
+            ${bannerRegistroPrevio}
             <div style="text-align:left; font-size:0.75rem; font-weight:800; color:#475569; letter-spacing:0.5px;">1. REGISTRAR ASISTENCIA / PERMISO:</div>
             <div class="grid-asistencia-btns">
                 <button class="btn-estado btn-p" onclick="marcarEstadoModal('P')">P<span>Presente</span></button>
@@ -200,7 +259,7 @@ function abrirPanelAccionEstudiante(ci) {
                 <button class="btn-estado btn-l" onclick="marcarEstadoModal('L')">L<span>Licencia</span></button>
             </div>
 
-            <textarea id="modalObs" placeholder="Observación / Motivo permiso (opcional)..." style="width:100%; border:1.5px solid #cbd5e1; border-radius:10px; padding:10px; font-size:0.85rem; margin-bottom:15px;"></textarea>
+            <textarea id="modalObs" placeholder="Observación / Motivo permiso (opcional)..." style="width:100%; border:1.5px solid #cbd5e1; border-radius:10px; padding:10px; font-size:0.85rem; margin-bottom:15px;">${registroHoyActual && registroHoyActual.observacion ? registroHoyActual.observacion : ''}</textarea>
 
             <div style="text-align:left; font-size:0.75rem; font-weight:800; color:#475569; letter-spacing:0.5px;">2. ACCIONES DIRECTAS PARA EL ALUMNO:</div>
             <div class="grid-acciones-estudiante">
@@ -213,10 +272,35 @@ function abrirPanelAccionEstudiante(ci) {
         showConfirmButton: false,
         showCloseButton: true
     });
+
+    reanudarScannerSiCorresponde();
 }
 
 async function marcarEstadoModal(estado) {
     if (!estudianteActualModal) return;
+
+    const obsTexto = document.getElementById("modalObs") ? document.getElementById("modalObs").value : "";
+
+    if (registroHoyActual) {
+        const anteriorTexto = obtenerNombreEstado(registroHoyActual.estado);
+        const nuevoTexto = obtenerNombreEstado(estado);
+
+        const confirmar = await Swal.fire({
+            title: 'Asistencia ya registrada hoy',
+            html: `El estudiante <b>${estudianteActualModal.nombre}</b> ya tiene registrado <b>${anteriorTexto}</b> hoy.<br><br>¿Deseas actualizar el registro del día a <b>${nuevoTexto}</b>?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#1e3a8a',
+            cancelButtonColor: '#64748b',
+            confirmButtonText: 'Sí, actualizar',
+            cancelButtonText: 'Cancelar'
+        });
+
+        if (!confirmar.isConfirmed) {
+            reanudarScannerSiCorresponde();
+            return;
+        }
+    }
 
     const payload = {
         action: 'guardarAsistencia',
@@ -226,17 +310,34 @@ async function marcarEstadoModal(estado) {
         fecha: obtenerFechaBolivia(),
         hora: obtenerHoraBolivia(),
         estado: estado,
-        observacion: document.getElementById("modalObs") ? document.getElementById("modalObs").value : ""
+        observacion: obsTexto
     };
 
-    Swal.fire({ title: 'Guardando...', didOpen: () => Swal.showLoading() });
+    Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     
-    const res = await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }).then(r => r.json());
-    if (res.success) {
-        Swal.fire('Registrado', `Asistencia (${estado}) guardada para ${estudianteActualModal.nombre}`, 'success');
-    } else {
-        Swal.fire('Error', 'No se pudo completar el registro', 'error');
+    try {
+        const res = await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }).then(r => r.json());
+        if (res.success) {
+            const tituloMsg = res.actualizado ? 'Asistencia Actualizada' : 'Asistencia Registrada';
+            const detalleMsg = res.actualizado
+                ? `Se actualizó el registro de hoy a (${obtenerNombreEstado(estado)}) para ${estudianteActualModal.nombre}.`
+                : `Asistencia (${obtenerNombreEstado(estado)}) guardada para ${estudianteActualModal.nombre}.`;
+
+            await Swal.fire({
+                icon: 'success',
+                title: tituloMsg,
+                text: detalleMsg,
+                timer: 1800,
+                showConfirmButton: false
+            });
+        } else {
+            await Swal.fire('Error', 'No se pudo completar el registro', 'error');
+        }
+    } catch (e) {
+        await Swal.fire('Error', 'Error de conexión al guardar', 'error');
     }
+
+    reanudarScannerSiCorresponde();
 }
 
 function irAIncidenciaModal() {
@@ -385,14 +486,14 @@ async function guardarEstudianteCrud() {
         return Swal.fire('Atención', 'Por favor completa C.I., Nombre y Curso', 'warning');
     }
 
+    // No se envía codigo_qr para proteger la fórmula automática de la columna F en Google Sheets
     const payload = {
         action: 'guardarEstudiante',
         ci: String(ci).trim(),
         nombre: nombre,
         curso: curso,
         tutor: document.getElementById("crudTutor").value,
-        telefono_tutor: document.getElementById("crudTelTutor").value,
-        codigo_qr: document.getElementById("crudQR").value || String(ci).trim()
+        telefono_tutor: document.getElementById("crudTelTutor").value
     };
 
     Swal.fire({ title: 'Guardando registro...', didOpen: () => Swal.showLoading() });
@@ -750,15 +851,69 @@ async function copiarHistorialWhatsApp() {
     }
 }
 
+// -------------------------------------------------------------
+// CONTROL ANTI-PARPADEO DE CÁMARA Y ESCÁNER QR
+// -------------------------------------------------------------
 function iniciarScanner() {
-    html5QrCode.start({ facingMode: "environment" }, { fps: 5, qrbox: 250 }, (codigo) => {
-        const alu = todosLosEstudiantes.find(e => String(e.codigo_qr).trim() === String(codigo).trim() || String(e.ci).trim() === String(codigo).trim());
-        if (alu) {
-            abrirPanelAccionEstudiante(alu.ci);
-        } else {
-            Swal.fire('Error', 'Código QR no registrado', 'error');
-        }
-    }).catch(err => console.error(err));
+    if (escanerActivo) {
+        reanudarScannerSiCorresponde();
+        return;
+    }
+
+    escaneoPausado = false;
+    html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 },
+        async (codigo) => {
+            if (escaneoPausado) return;
+            escaneoPausado = true;
+
+            try {
+                if (html5QrCode.getState() === Html5QrcodeScannerState.SCANNING) {
+                    html5QrCode.pause(true);
+                }
+            } catch (e) {}
+
+            const alu = todosLosEstudiantes.find(e =>
+                String(e.codigo_qr).trim() === String(codigo).trim() ||
+                String(e.ci).trim() === String(codigo).trim()
+            );
+
+            if (alu) {
+                await abrirPanelAccionEstudiante(alu.ci);
+            } else {
+                await Swal.fire('Error', 'Código QR no registrado', 'error');
+                reanudarScannerSiCorresponde();
+            }
+        },
+        () => {}
+    ).then(() => {
+        escanerActivo = true;
+    }).catch(err => console.error("Error al iniciar cámara:", err));
+}
+
+function reanudarScannerSiCorresponde() {
+    escaneoPausado = false;
+    if (!escanerActivo) return;
+
+    const tabAsistenciaActiva = document.getElementById('tab-asistencia').classList.contains('active');
+    const modoQRActivo = document.getElementById('btnModoQR').classList.contains('active');
+
+    if (tabAsistenciaActiva && modoQRActivo) {
+        try {
+            if (html5QrCode.getState() === Html5QrcodeScannerState.PAUSED) {
+                html5QrCode.resume();
+            }
+        } catch (e) {}
+    }
+}
+
+function detenerScanner() {
+    if (!escanerActivo) return;
+    html5QrCode.stop().then(() => {
+        escanerActivo = false;
+        escaneoPausado = false;
+    }).catch(err => console.error("Error al detener cámara:", err));
 }
 
 window.onload = async () => {
